@@ -1,6 +1,8 @@
-import re, requests, time, json
+import re, requests, time, json, yaml
 from datetime import date, timedelta
 from optparse import OptionParser
+from pylatex import Document, Section, Subsection, Command, NoEscape
+from pylatex import Tabular, MultiColumn, NoEscape
 import xml.etree.ElementTree as ET
 
 def parse_args():
@@ -20,6 +22,27 @@ def parse_args():
         help="End date in format YYYY-MM-DD",
         metavar="<End date>",
         default=date.today().isoformat()
+    )
+    parser.add_option(
+        "-y",
+        "--yaml",
+        dest="yaml",
+        help="Input option YAML file.",
+        metavar="<YAML Option>",
+    )
+    parser.add_option(
+        "-j",
+        "--json",
+        dest="json",
+        help="Output JSON file.",
+        metavar="<JSON Output>",
+    )
+    parser.add_option(
+        "-l",
+        "--latex",
+        dest="latex",
+        help="Output latex file.",
+        metavar="<Latex Output>",
     )
     (options, args) = parser.parse_args()
     return options, args
@@ -81,39 +104,6 @@ class AndNotNode:
             query = f"%28{query}%29"
         return query
 
-
-queries = [
-    Node("quarkoni*"),
-    Node("charmoni*"),
-    Node("bottomoni*"),
-    Node("tetra*quark*"),
-    Node("penta*quark*"),
-    Node("%22exotic+hadron*%22"),
-    Node("%22heavy+quark*%22"),
-    Node("%22heavy+flavo*r%22"),
-    Node("B_*c"),
-    Node("%22doubl*+bottom%22"),
-    Node("%22doubl*+beauty%22"),
-    Node("%22doubl*+charm%22"),
-    Node("%22bottom+spectr*%22"),
-    Node("%22beauty+spectr*%22"),
-    Node("%22charm+spectr*%22"),
-    Node("P_*c"),
-]
-
-categories = [
-    "hep-ex",
-    "hep-lat",
-    "hep-ph",
-    "hep-th",
-    "nucl-ex",
-    "nucl-th",
-]
-
-vetoes = [
-    "Higgs",
-    "boson",
-]
 
 def format_whitespace(text):
     leading_whitespace = re.compile(r"^\s+")
@@ -216,29 +206,27 @@ def parse_entry(entry):
     )
     return entry
 
-
-if __name__ == "__main__":
-    options, args = parse_args()
+def query_arxiv(yaml_file, start_date, end_date):
+    with open(yaml_file, "r") as file:
+        query_options = yaml.safe_load(file)
 
     # Create the queries
     title_queries = [
-        query.query_string("ti", group=(not isinstance(query, Node))) for query in queries
+        Node(query).query_string("ti") for query in query_options["queries"]
     ]
-
     abstract_queries = [
-        query.query_string("abs", group=(not isinstance(query, Node))) for query in queries
+        Node(query).query_string("abs") for query in query_options["queries"]
     ]
 
     title_vetoes = [
-        Node(veto).query_string("ti") for veto in vetoes
+        Node(veto).query_string("ti") for veto in query_options["vetoes"]
     ]
-
     abstract_vetoes = [
-        Node(veto).query_string("abs") for veto in vetoes
+        Node(veto).query_string("abs") for veto in query_options["vetoes"]
     ]
 
     categories = [
-        Node(category).query_string("cat") for category in categories
+        Node(category).query_string("cat") for category in query_options["categories"]
     ]
     categories = OrNode(categories).query_string(group=True)
 
@@ -251,10 +239,10 @@ if __name__ == "__main__":
     # Get the arXiv entries submitted and last updated in this time period
     entries = dict()
     for date_type in ["submitted", "lastUpdated"]:
-        date_filter = process_date(options.start, options.end, f"{date_type}Date")
-        search_query = f"search_query={query}+AND+{categories}"
-        # search_query = f"search_query={query}+AND+{categories}+AND+{date_filter}"
-        max_results = "max_results=10"
+        date_filter = process_date(start_date, end_date, f"{date_type}Date")
+        # search_query = f"search_query={query}+AND+{categories}"
+        search_query = f"search_query={query}+AND+{categories}+AND+{date_filter}"
+        max_results = "max_results=50"
         sort = f"sortBy={date_type}Date&sortOrder=descending"
         full_query = "&".join([search_query, max_results, sort])
         url = f"https://export.arxiv.org/api/query?{full_query}"
@@ -274,8 +262,77 @@ if __name__ == "__main__":
         if entry.arxivID not in submitted_arXivIDs
     ]
 
-    with open("submitted_entries.json", "w") as file:
-        json.dump(entries["submitted"], file, cls=ArXivEntryEncoder, indent=2)
+    return entries
 
-    with open("updated_entries.json", "w") as file:
-        json.dump(entries["lastUpdated"], file, cls=ArXivEntryEncoder, indent=2)
+def convert_to_latex(latex_path, entries, start_date, end_date):
+    start_date = date.fromisoformat(start_date)
+    end_date = date.fromisoformat(end_date)
+    start_date = start_date.strftime("%y/%m/%d")
+    end_date = end_date.strftime("%y/%m/%d")
+
+    title = [
+        r"B-Hadrons and Quarkonia ArXiv Summary\vspace{0.5cm}\\",
+        "\n\large ",
+        f"From {start_date} to {end_date}",
+        # r"\vspace{0.1cm}\\",
+        # f""
+    ]
+    title = "".join(title)
+
+    doc = Document()
+    doc.packages.append(NoEscape(r'\usepackage{hyperref}'))
+    doc.packages.append(NoEscape(r'\usepackage{xcolor}'))
+    doc.packages.append(NoEscape(r'\usepackage[margin=1.5in]{geometry}'))
+    # Define a custom LaTeX command for hyperlinks
+    doc.preamble.append(NoEscape(r'\newcommand{\hlink}[2]{\href{#1}{\textcolor{blue}{#2}}}'))
+    doc.preamble.append(Command('title', NoEscape(title)))
+    doc.preamble.append(Command('date', ''))
+    doc.append(NoEscape(r'\maketitle'))
+    doc.append(NoEscape(r'\tableofcontents'))
+    doc.append(NoEscape(r'\newpage'))
+
+    for key, label in zip(["submitted", "lastUpdated"], ["Newly Submitted", "Recently Updated"]):
+        with doc.create(Section(f"{label} Papers")):
+            for entry in entries.get(key, []):
+                with doc.create(Subsection(NoEscape(entry.title))):
+                    with doc.create(Tabular('p{0.12\linewidth}p{0.86\linewidth}', row_height=1.2)) as table:
+                        table.add_row((NoEscape(r'\textbf{Authors}:'), NoEscape(", ".join(entry.authors))))
+                        table.add_row((NoEscape(r'\textbf{arXivID}:'), NoEscape(r'\hlink{' + entry.link + '}{' + entry.arxivID + '}')))
+                        if key == "lastUpdated":
+                            table.add_row((NoEscape(r'\textbf{Updated}:'), NoEscape(entry.updated)))
+                        table.add_row((NoEscape(r'\textbf{Submitted}:'), NoEscape(entry.submitted)))
+                        table.add_row((NoEscape(r'\textbf{Categories}:'), NoEscape(", ".join([f"\\texttt{{{category}}}" for category in entry.categories]))))
+                    doc.append(NoEscape('\n\n'))
+                    doc.append(NoEscape(r'\vspace{0.3cm}'))
+                    doc.append(NoEscape(r'\noindent\textbf{\underline{Abstract:}}'))
+                    doc.append(NoEscape(r'\vspace{0.1cm}\\'))
+                    doc.append(NoEscape(f"\hspace{{2em}}{entry.abstract}\n\n"))
+
+        # self.title = title
+        # self.authors = authors
+        # self.abstract = abstract
+        # self.submitted = submitted
+        # self.updated = updated
+        # self.arxivID = arxivID
+        # self.link = link
+        # self.categories = categories
+
+    doc.generate_tex(latex_path)
+
+    # if hasattr(entries, 'latex') and entries.latex:
+    #     doc.generate_pdf(entries.latex, clean_tex=False)
+
+if __name__ == "__main__":
+    options, args = parse_args()
+
+    entries = query_arxiv(
+        yaml_file=options.yaml,
+        start_date=options.start,
+        end_date=options.end
+    )
+
+    if options.json:
+        with open(options.json, "w") as file:
+            json.dump(entries, file, cls=ArXivEntryEncoder, indent=2)
+
+    convert_to_latex(latex_path=options.latex, entries=entries, start_date=options.start, end_date=options.end)
