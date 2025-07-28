@@ -1,0 +1,31 @@
+title: "B-Hadrons and Quarkonia"
+
+queries:
+  - "quarkoni*"
+  - "charmoni*"
+  - "bottomoni*"
+  - "tetra*quark*"
+  - "penta*quark*"
+  - "%22exotic+hadron*%22"
+  - "%22heavy+quark*%22"
+  - "%22heavy+flavo*r%22"
+  - "B_*c"
+  - "%22doubl*+bottom%22"
+  - "%22doubl*+beauty%22"
+  - "%22doubl*+charm%22"
+  - "%22bottom+spectr*%22"
+  - "%22beauty+spectr*%22"
+  - "%22charm+spectr*%22"
+  - "P_*c"
+
+vetoes:
+  - "Higgs"
+  - "boson"
+
+categories:
+  - "hep-ex"
+  - "hep-lat"
+  - "hep-ph"
+  - "hep-th"
+  - "nucl-ex"
+  - "nucl-th"
