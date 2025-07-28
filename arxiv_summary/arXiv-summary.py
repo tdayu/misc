@@ -1,9 +1,26 @@
-import re, requests, time, json, yaml
+import re, requests, time, json, yaml, os
 from datetime import date, timedelta
 from optparse import OptionParser
-from pylatex import Document, Section, Subsection, Command, NoEscape
-from pylatex import Tabular, MultiColumn, NoEscape
+from pylatex import (
+    Document,
+    Section,
+    Subsection,
+    Command,
+    NoEscape,
+    Package,
+    Tabular,
+    NoEscape,
+    NewPage,
+    UnsafeCommand,
+    VerticalSpace,
+    Subsubsection,
+    HorizontalSpace,
+    LineBreak,
+    LargeText,
+)
+import pylatex.utils
 import xml.etree.ElementTree as ET
+
 
 def parse_args():
     parser = OptionParser(usage="usage: %prog [options] arg")
@@ -13,7 +30,7 @@ def parse_args():
         dest="start",
         help="Start date in format YYYY-MM-DD",
         metavar="<Start date>",
-        default=(date.today() - timedelta(days=7)).isoformat()
+        default=(date.today() - timedelta(days=7)).isoformat(),
     )
     parser.add_option(
         "-e",
@@ -21,7 +38,7 @@ def parse_args():
         dest="end",
         help="End date in format YYYY-MM-DD",
         metavar="<End date>",
-        default=date.today().isoformat()
+        default=date.today().isoformat(),
     )
     parser.add_option(
         "-y",
@@ -57,7 +74,9 @@ def process_date(start, end, date_query):
     if not end_match:
         raise ValueError(f"Invalid date format: {end}. Expected YYYY-MM-DD.")
 
-    starttime = f"{start_match.group(1)}{start_match.group(2)}{start_match.group(3)}0000"
+    starttime = (
+        f"{start_match.group(1)}{start_match.group(2)}{start_match.group(3)}0000"
+    )
     endtime = f"{end_match.group(1)}{end_match.group(2)}{end_match.group(3)}2359"
 
     return f"{date_query}:[{starttime}+TO+{endtime}]"
@@ -73,25 +92,32 @@ class Node:
             query = f"%28{query}%29"
         return query
 
+
 class OrNode:
     def __init__(self, children):
         self.children = children
 
     def query_string(self, prefix=None, group=False):
-        query = "+OR+".join([f"{prefix}:{child}" if prefix else child for child in self.children])
+        query = "+OR+".join(
+            [f"{prefix}:{child}" if prefix else child for child in self.children]
+        )
         if group:
             query = f"%28{query}%29"
         return query
+
 
 class AndNode:
     def __init__(self, children):
         self.children = children
 
     def query_string(self, prefix=None, group=False):
-        query = "+AND+".join([f"{prefix}:{child}" if prefix else child for child in self.children])
+        query = "+AND+".join(
+            [f"{prefix}:{child}" if prefix else child for child in self.children]
+        )
         if group:
             query = f"%28{query}%29"
         return query
+
 
 class AndNotNode:
     def __init__(self, childA, childB):
@@ -99,7 +125,11 @@ class AndNotNode:
         self.childB = childB
 
     def query_string(self, prefix=None, group=False):
-        query = f"{prefix}:{self.childA}+ANDNOT+{prefix}:{self.childB}" if prefix else f"{self.childA}+ANDNOT+{self.childB}"
+        query = (
+            f"{prefix}:{self.childA}+ANDNOT+{prefix}:{self.childB}"
+            if prefix
+            else f"{self.childA}+ANDNOT+{self.childB}"
+        )
         if group:
             query = f"%28{query}%29"
         return query
@@ -120,7 +150,9 @@ def format_date(date_str):
 
 
 class ArXivEntry:
-    def __init__(self, title, authors, abstract, submitted, updated, arxivID, link, categories):
+    def __init__(
+        self, title, authors, abstract, submitted, updated, arxivID, link, categories
+    ):
         self.title = title
         self.authors = authors
         self.abstract = abstract
@@ -161,10 +193,12 @@ class ArXivEntryEncoder(json.JSONEncoder):
 
 
 def format_link(link):
-    pattern = re.compile(r"https?://arxiv.org/abs/([0-9]{4}\.[0-9]{4})")
+    pattern = re.compile(r"https?://arxiv.org/abs/([0-9]+\.[0-9]+)")
     match = pattern.match(link)
     if not match:
-        raise ValueError(f"Invalid link format: {link}. Expected arxiv.org/abs/YYYY.NNNN.")
+        raise ValueError(
+            f"Invalid link format: {link}. Expected arxiv.org/abs/YYYY.NNNN."
+        )
     arxivID = match.group(1)
     link = match.group(0)
 
@@ -176,7 +210,9 @@ def parse_entry(entry):
     title = format_whitespace(title)
 
     authors = entry.findall("{http://www.w3.org/2005/Atom}author")
-    authors = [author.find("{http://www.w3.org/2005/Atom}name").text for author in authors]
+    authors = [
+        author.find("{http://www.w3.org/2005/Atom}name").text for author in authors
+    ]
     authors = [format_whitespace(author) for author in authors]
 
     abstract = entry.find("{http://www.w3.org/2005/Atom}summary").text
@@ -206,10 +242,8 @@ def parse_entry(entry):
     )
     return entry
 
-def query_arxiv(yaml_file, start_date, end_date):
-    with open(yaml_file, "r") as file:
-        query_options = yaml.safe_load(file)
 
+def query_arxiv(query_options, start_date, end_date):
     # Create the queries
     title_queries = [
         Node(query).query_string("ti") for query in query_options["queries"]
@@ -218,9 +252,7 @@ def query_arxiv(yaml_file, start_date, end_date):
         Node(query).query_string("abs") for query in query_options["queries"]
     ]
 
-    title_vetoes = [
-        Node(veto).query_string("ti") for veto in query_options["vetoes"]
-    ]
+    title_vetoes = [Node(veto).query_string("ti") for veto in query_options["vetoes"]]
     abstract_vetoes = [
         Node(veto).query_string("abs") for veto in query_options["vetoes"]
     ]
@@ -230,7 +262,7 @@ def query_arxiv(yaml_file, start_date, end_date):
     ]
     categories = OrNode(categories).query_string(group=True)
 
-    queries = title_queries
+    queries = title_queries + abstract_queries
     queries = OrNode(queries).query_string(group=True)
     vetoes = title_vetoes + abstract_vetoes
     vetoes = OrNode(vetoes).query_string(group=True)
@@ -256,83 +288,145 @@ def query_arxiv(yaml_file, start_date, end_date):
         entries[date_type] = queried_entries
 
     # Remove updated entries from submitted entries
-    submitted_arXivIDs = [ entry.arxivID for entry in entries["submitted"] ]
+    submitted_arXivIDs = [entry.arxivID for entry in entries["submitted"]]
     entries["lastUpdated"] = [
-        entry for entry in entries["lastUpdated"]
+        entry
+        for entry in entries["lastUpdated"]
         if entry.arxivID not in submitted_arXivIDs
     ]
 
     return entries
 
-def convert_to_latex(latex_path, entries, start_date, end_date):
+
+def convert_to_latex(latex_path, summary_title, entries, start_date, end_date):
     start_date = date.fromisoformat(start_date)
     end_date = date.fromisoformat(end_date)
-    start_date = start_date.strftime("%y/%m/%d")
-    end_date = end_date.strftime("%y/%m/%d")
+    start_date = start_date.strftime("%d %B %Y")
+    end_date = end_date.strftime("%d %B %Y")
+    start_date = pylatex.utils.bold(start_date)
+    end_date = pylatex.utils.bold(end_date)
 
+    # Since we have a multi-line title, we need to use a list and with hard-coded spacings
     title = [
-        r"B-Hadrons and Quarkonia ArXiv Summary\vspace{0.5cm}\\",
-        "\n\large ",
-        f"From {start_date} to {end_date}",
-        # r"\vspace{0.1cm}\\",
-        # f""
+        pylatex.utils.bold(summary_title),
+        "Arxiv Summary",
+        LineBreak().dumps(),
+        VerticalSpace("0.5cm").dumps(),
+        LargeText(NoEscape(f"From {start_date} to {end_date}")).dumps(),
     ]
-    title = "".join(title)
+    title = " ".join(title)
 
     doc = Document()
-    doc.packages.append(NoEscape(r'\usepackage{hyperref}'))
-    doc.packages.append(NoEscape(r'\usepackage{xcolor}'))
-    doc.packages.append(NoEscape(r'\usepackage[margin=1.5in]{geometry}'))
-    # Define a custom LaTeX command for hyperlinks
-    doc.preamble.append(NoEscape(r'\newcommand{\hlink}[2]{\href{#1}{\textcolor{blue}{#2}}}'))
-    doc.preamble.append(Command('title', NoEscape(title)))
-    doc.preamble.append(Command('date', ''))
-    doc.append(NoEscape(r'\maketitle'))
-    doc.append(NoEscape(r'\tableofcontents'))
-    doc.append(NoEscape(r'\newpage'))
+    doc.packages.append(Package("hyperref"))
+    doc.packages.append(Package("xcolor"))
+    doc.packages.append(Package("amsmath"))
+    # unicode-math prevents lualatex from throwing an error when unicode characters are encountered in the title
+    doc.packages.append(Package(NoEscape("unicode-math")))
+    doc.packages.append(Package("geometry", options="margin=1.5in"))
+    # Define a custom LaTeX command for hyperlinks to a website
+    doc.preamble.append(
+        UnsafeCommand("newcommand", arguments=r"\hlink", options=2, extra_arguments=r"\href{#1}{\textcolor{blue}{#2}}")
+    )
+    doc.preamble.append(Command("title", NoEscape(title)))
+    doc.preamble.append(Command("date", ""))
+    doc.append(Command("maketitle"))
+    doc.append(Command("tableofcontents"))
 
-    for key, label in zip(["submitted", "lastUpdated"], ["Newly Submitted", "Recently Updated"]):
-        with doc.create(Section(f"{label} Papers")):
-            for entry in entries.get(key, []):
-                with doc.create(Subsection(NoEscape(entry.title))):
-                    with doc.create(Tabular('p{0.12\linewidth}p{0.86\linewidth}', row_height=1.2)) as table:
-                        table.add_row((NoEscape(r'\textbf{Authors}:'), NoEscape(", ".join(entry.authors))))
-                        table.add_row((NoEscape(r'\textbf{arXivID}:'), NoEscape(r'\hlink{' + entry.link + '}{' + entry.arxivID + '}')))
+    for section_index, (key, label) in enumerate(
+        zip(["submitted", "lastUpdated"], ["Newly Submitted", "Recently Updated"])
+    ):
+        doc.append(NewPage())
+        with doc.create(
+            Section(f"{label} Papers", numbering=True, label=f"sec:sec{section_index}")
+        ):
+            for entry_index, entry in enumerate(entries.get(key, [])):
+                with doc.create(
+                    Subsection(
+                        title=NoEscape(entry.title),
+                        numbering=True,
+                        label=f"sec:sec{section_index}subsec{entry_index}",
+                    )
+                ):
+                    # Use a table to write the information
+                    with doc.create(
+                        Tabular("p{0.15\linewidth}p{0.83\linewidth}", row_height=1.2)
+                    ) as table:
+                        table.add_row(
+                            (
+                                NoEscape(pylatex.utils.bold("Authors") + ":"),
+                                NoEscape(", ".join(entry.authors)),
+                            )
+                        )
+                        table.add_row(
+                            (
+                                NoEscape(pylatex.utils.bold("arXivID") + ":"),
+                                Command("hlink", arguments=[entry.link, entry.arxivID]),
+                            )
+                        )
                         if key == "lastUpdated":
-                            table.add_row((NoEscape(r'\textbf{Updated}:'), NoEscape(entry.updated)))
-                        table.add_row((NoEscape(r'\textbf{Submitted}:'), NoEscape(entry.submitted)))
-                        table.add_row((NoEscape(r'\textbf{Categories}:'), NoEscape(", ".join([f"\\texttt{{{category}}}" for category in entry.categories]))))
-                    doc.append(NoEscape('\n\n'))
-                    doc.append(NoEscape(r'\vspace{0.3cm}'))
-                    doc.append(NoEscape(r'\noindent\textbf{\underline{Abstract:}}'))
-                    doc.append(NoEscape(r'\vspace{0.1cm}\\'))
-                    doc.append(NoEscape(f"\hspace{{2em}}{entry.abstract}\n\n"))
+                            table.add_row(
+                                (
+                                    NoEscape(pylatex.utils.bold("Updated") + ":"),
+                                    NoEscape(entry.updated),
+                                )
+                            )
+                        table.add_row(
+                            (
+                                NoEscape(pylatex.utils.bold("Submitted") + ":"),
+                                NoEscape(entry.submitted),
+                            )
+                        )
+                        table.add_row(
+                            (
+                                NoEscape(pylatex.utils.bold("Categories") + ":"),
+                                NoEscape(
+                                    ", ".join(
+                                        [
+                                            f"\\texttt{{{category}}}"
+                                            for category in entry.categories
+                                        ]
+                                    )
+                                ),
+                            )
+                        )
+                    # Write the abstract field
+                    with doc.create(Subsubsection(Command("underline", "Abstract"), numbering=False, label=False)):
+                        doc.append(HorizontalSpace("2em"))
+                        doc.append(NoEscape(entry.abstract))
 
-        # self.title = title
-        # self.authors = authors
-        # self.abstract = abstract
-        # self.submitted = submitted
-        # self.updated = updated
-        # self.arxivID = arxivID
-        # self.link = link
-        # self.categories = categories
+    # Generate PDF with latexmk so that it goes through 2 passes so that cross-references are produced
+    doc.generate_pdf(
+        latex_path,
+        clean_tex=True,
+        compiler="latexmk",
+        compiler_args=["-lualatex", "-print=pdf"], # Use lualatex so that Unicode characters are supported
+    )
 
-    doc.generate_tex(latex_path)
-
-    # if hasattr(entries, 'latex') and entries.latex:
-    #     doc.generate_pdf(entries.latex, clean_tex=False)
 
 if __name__ == "__main__":
     options, args = parse_args()
 
+    with open(options.yaml, "r") as file:
+        yaml_options = yaml.safe_load(file)
+    
     entries = query_arxiv(
-        yaml_file=options.yaml,
-        start_date=options.start,
-        end_date=options.end
+        query_options=yaml_options, start_date=options.start, end_date=options.end
     )
+    json_path = os.path.abspath(options.json) if options.json else None
+    latex_path = os.path.abspath(options.latex) if options.latex else None
 
-    if options.json:
-        with open(options.json, "w") as file:
+    if json_path is None and latex_path is None:
+        raise ValueError("At least one of --json (-j) or --latex (-l) must be specified.")
+
+    if json_path:
+        with open(json_path, "w") as file:
             json.dump(entries, file, cls=ArXivEntryEncoder, indent=2)
 
-    convert_to_latex(latex_path=options.latex, entries=entries, start_date=options.start, end_date=options.end)
+    if latex_path:
+        convert_to_latex(
+            latex_path=latex_path,
+            summary_title=yaml_options["title"],
+            entries=entries,
+            start_date=options.start,
+            end_date=options.end,
+        )
