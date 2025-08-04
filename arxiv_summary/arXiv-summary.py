@@ -61,6 +61,14 @@ def parse_args():
         help="Output latex file.",
         metavar="<Latex Output>",
     )
+    parser.add_option(
+        "-t",
+        "--truncate-authors",
+        dest="truncate_authors",
+        help="Truncate the author list when more than 10 authors.",
+        metavar="<Truncate Authors>",
+        action="store_true"
+    )
     (options, args) = parser.parse_args()
     return options, args
 
@@ -298,13 +306,31 @@ def query_arxiv(query_options, start_date, end_date):
     return entries
 
 
-def convert_to_latex(latex_path, summary_title, entries, start_date, end_date):
+def truncate_author_list(entry):
+    authors = entry.authors
+    if len(authors) > 10:
+        is_collaboration = re.match(r"[\w\s]+Collaboration", authors[0])
+        if is_collaboration:
+            entry.authors = [authors[0]]
+        else:
+            entry.authors = [f"{authors[0]} et. al."]
+
+    return entry
+
+
+def convert_to_latex(latex_path, summary_title, entries, start_date, end_date, truncate_authors):
     start_date = date.fromisoformat(start_date)
     end_date = date.fromisoformat(end_date)
     start_date = start_date.strftime("%d %B %Y")
     end_date = end_date.strftime("%d %B %Y")
     start_date = pylatex.utils.bold(start_date)
     end_date = pylatex.utils.bold(end_date)
+
+    if truncate_authors:
+        entries = {
+            key : [ truncate_author_list(entry) for entry in values ]
+            for key, values in entries.items()
+        }
 
     # Since we have a multi-line title, we need to use a list and with hard-coded spacings
     title = [
@@ -429,4 +455,5 @@ if __name__ == "__main__":
             entries=entries,
             start_date=options.start,
             end_date=options.end,
+            truncate_authors=options.truncate_authors
         )
