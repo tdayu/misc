@@ -213,6 +213,11 @@ def format_link(link):
     return arxivID, link
 
 
+def substitution(text):
+    text = text.replace("\\rightarrow", "\\to ")
+    text = text.replace("\\to", "\\to ")
+    return text
+
 def parse_entry(entry):
     title = entry.find("{http://www.w3.org/2005/Atom}title").text
     title = format_whitespace(title)
@@ -239,9 +244,9 @@ def parse_entry(entry):
     categories = [category.get("term") for category in categories]
 
     entry = ArXivEntry(
-        title=title,
+        title=substitution(title),
         authors=authors,
-        abstract=abstract,
+        abstract=substitution(abstract),
         submitted=submitted,
         updated=updated,
         arxivID=arxivID,
@@ -342,13 +347,21 @@ def convert_to_latex(latex_path, summary_title, entries, start_date, end_date, t
     ]
     title = " ".join(title)
 
-    doc = Document()
+    doc = Document(
+        inputenc=None,
+        fontenc=None,
+        documentclass='article'
+    )
+
+    doc.packages.append(Package("lmodern"))
+    doc.packages.append(Package("textcomp"))
+    doc.packages.append(Package("lastpage"))
     doc.packages.append(Package("hyperref"))
     doc.packages.append(Package("xcolor"))
     doc.packages.append(Package("amsmath"))
-    # unicode-math prevents lualatex from throwing an error when unicode characters are encountered in the title
     doc.packages.append(Package(NoEscape("unicode-math")))
     doc.packages.append(Package("geometry", options="margin=1.5in"))
+    doc.preamble.append(NoEscape(r"\setmathfont{Latin Modern Math}"))
     # Define a custom LaTeX command for hyperlinks to a website
     doc.preamble.append(
         UnsafeCommand("newcommand", arguments=r"\hlink", options=2, extra_arguments=r"\href{#1}{\textcolor{blue}{#2}}")
