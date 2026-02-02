@@ -20,7 +20,6 @@ queries:
 
 vetoes:
   - "Higgs"
-  - "boson"
 
 categories:
   - "hep-ex"
